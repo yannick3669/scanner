@@ -199,7 +199,8 @@
   // Categories, in the order used to sort the spreadsheet
   const CATS = ['Congelé', 'Frigo', 'Fruits et légumes', 'Sec', 'Boissons', 'Pharmacie', 'Hygiène', 'Ménager', 'Animaux', 'Autre'];
   function guessCat(tags, host) {
-    const t = (tags || []).join(' ');
+    // ignore umbrella tags like 'plant-based-foods-and-beverages' (would wrongly match 'beverages')
+    const t = (tags || []).filter(x => !/foods-and-beverages/.test(x)).join(' ');
     const has = (...w) => w.some(x => t.includes(x));
     if (has('frozen', 'ice-cream', 'surgel')) return 'Congelé';
     if (has('medicine', 'medication', 'dietary-supplement', 'vitamin', 'pharmac', 'painkiller', 'first-aid')) return 'Pharmacie';
