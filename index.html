@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1f6f5c">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Scanner</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%231f6f5c'/%3E%3Cpath d='M7 7v10M10 7v10M13 7v10M16 7v10' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+<style>
+  :root{--bg:#f6f5f1;--card:#fff;--ink:#1d1d1b;--muted:#6b6a65;--line:#e4e2db;--accent:#1f6f5c;--accent-ink:#fff;--warn:#b4432f}
+  @media (prefers-color-scheme:dark){:root{--bg:#151514;--card:#1f1f1d;--ink:#f1efe9;--muted:#a19f97;--line:#33322f;--accent:#4fb497;--accent-ink:#0d1d18;--warn:#e8806b}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:640px;margin:0 auto;padding:14px 14px 40px}
+  h1{font-size:20px;margin:2px 0 12px}
+  .btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:18px;border-radius:14px;border:0;
+    background:var(--accent);color:var(--accent-ink);font-size:19px;font-weight:650;cursor:pointer}
+  .btn.stop{background:var(--warn);color:#fff}
+  .sec{padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:15px;font-weight:600;cursor:pointer}
+  .sec:disabled{opacity:.45}
+  #cam{position:relative;display:none;margin-top:10px;border-radius:14px;overflow:hidden;background:#000;aspect-ratio:4/3}
+  #cam.on{display:block}
+  video{width:100%;height:100%;object-fit:cover;display:block}
+  .aim{position:absolute;left:10%;right:10%;top:30%;bottom:30%;border:3px solid rgba(255,255,255,.85);border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.25);transition:border-color .2s}
+  .aim.hit{border-color:#4fe0a8}
+  .camctl{position:absolute;right:8px;top:8px;display:flex;gap:6px}
+  .camctl button{background:rgba(0,0,0,.55);color:#fff;border:0;border-radius:8px;padding:8px 10px;font-size:14px}
+  .row{display:flex;gap:8px;margin-top:10px}
+  input[type=text]{flex:1;min-width:0;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:16px}
+  .opts{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:14px;color:var(--muted)}
+  .msg{margin-top:10px;padding:11px 13px;border-radius:12px;background:var(--card);border:1px solid var(--line);font-size:15px;display:none}
+  .msg.show{display:block}.msg.ok{border-color:var(--accent)}.msg.err{border-color:var(--warn)}
+  .bar{display:flex;align-items:center;justify-content:space-between;margin:20px 0 8px;gap:8px;flex-wrap:wrap}
+  .bar h2{font-size:16px;margin:0}.count{color:var(--muted);font-weight:400}
+  .exports{display:flex;gap:8px;flex-wrap:wrap}
+  ul{list-style:none;margin:0;padding:0}
+  li{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+  li.flash{animation:flash 1.2s ease-out}
+  @keyframes flash{from{box-shadow:0 0 0 3px var(--accent)}to{box-shadow:0 0 0 0 transparent}}
+  .top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:16px;font-weight:600;word-break:break-all}
+  .meta{color:var(--muted);font-size:12px;white-space:nowrap}
+  .desc{width:100%;margin-top:6px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px}
+  .ctl{display:flex;align-items:center;gap:6px;margin-top:8px}
+  .ctl button{width:36px;height:36px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:18px;cursor:pointer}
+  .ctl .qty{min-width:28px;text-align:center;font-weight:650}
+  .ctl .del{margin-left:auto;width:auto;padding:0 10px;font-size:14px;color:var(--warn)}
+  .ctl a{font-size:13px;color:var(--muted)}
+  .empty{color:var(--muted);text-align:center;padding:26px 10px;border:1px dashed var(--line);border-radius:12px}
+  .foot{margin-top:16px;color:var(--muted);font-size:13px}
+  dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);padding:18px;max-width:340px}
+  dialog::backdrop{background:rgba(0,0,0,.4)}
+  .danger{background:var(--warn)!important;color:#fff!important;border-color:var(--warn)!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Scanner de codes-barres</h1>
+
+  <button class="btn" id="camBtn">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
+    <span id="camLabel">Démarrer le scan</span>
+  </button>
+
+  <div id="cam">
+    <video id="video" playsinline muted></video>
+    <div class="aim" id="aim"></div>
+    <div class="camctl"><button id="torchBtn" hidden>💡 Lampe</button></div>
+  </div>
+
+  <form class="row" id="manual" autocomplete="off">
+    <input type="text" id="manualCode" inputmode="numeric" placeholder="…ou taper un code">
+    <button class="sec" type="submit">Ajouter</button>
+  </form>
+  <label class="opts"><input type="checkbox" id="merge" checked> Même code scanné de nouveau = quantité +1</label>
+
+  <div class="msg" id="msg"></div>
+
+  <div class="bar">
+    <h2>Produits <span class="count" id="count"></span></h2>
+    <div class="exports">
+      <button class="sec" id="odsBtn">Télécharger .ods</button>
+      <button class="sec" id="shareBtn" hidden>Partager</button>
+    </div>
+  </div>
+  <ul id="list"></ul>
+  <div class="row" style="justify-content:flex-end"><button class="sec" id="clearBtn">Tout effacer</button></div>
+  <p class="foot">La liste reste sur ce téléphone. « Télécharger .ods » crée un classeur OpenOffice Calc ; « Partager » permet de l'envoyer par courriel, Drive, etc.</p>
+</main>
+
+<dialog id="confirmDlg">
+  <p id="confirmText" style="margin-top:0"></p>
+  <div class="row" style="justify-content:flex-end">
+    <button class="sec" id="confirmNo">Annuler</button>
+    <button class="sec danger" id="confirmYes">Supprimer</button>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const KEY = 'barcode-scans-v1';
+  let items = [];
+  try { items = JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {} };
+
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtDate = t => new Date(t).toLocaleString('fr-CA', {dateStyle:'short', timeStyle:'short'});
+  const showMsg = (html, kind) => { const m = $('msg'); m.className = 'msg show ' + (kind || ''); m.innerHTML = html; };
+  let flashId = null;
+
+  // ---------- List ----------
+  function render() {
+    $('count').textContent = items.length ? `(${items.length})` : '';
+    $('odsBtn').disabled = $('shareBtn').disabled = $('clearBtn').disabled = !items.length;
+    const list = $('list');
+    if (!items.length) { list.innerHTML = '<li class="empty">Aucun produit pour l\'instant.</li>'; return; }
+    list.innerHTML = [...items].sort((a, b) => b.t - a.t).map(it => `
+      <li data-id="${esc(it.id)}" class="${it.id === flashId ? 'flash' : ''}">
+        <div class="top"><span class="code">${esc(it.code)}</span><span class="meta">${esc(fmtDate(it.t))}</span></div>
+        <input class="desc" data-id="${esc(it.id)}" placeholder="Description (facultatif)" value="${esc(it.desc)}">
+        <div class="ctl">
+          <button data-act="minus" aria-label="Moins">−</button><span class="qty">${it.qty}</span><button data-act="plus" aria-label="Plus">+</button>
+          ${/^\d{8,14}$/.test(it.code) ? `<a href="https://world.openfoodfacts.org/product/${encodeURIComponent(it.code)}" target="_blank" rel="noopener">chercher le produit</a>` : ''}
+          <button class="del" data-act="del">Supprimer</button>
+        </div>
+      </li>`).join('');
+    flashId = null;
+  }
+  const newId = () => 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+  function addCode(code, format) {
+    code = String(code).trim(); if (!code) return;
+    const now = Date.now();
+    const ex = $('merge').checked && items.find(x => x.code === code);
+    if (ex) { ex.qty = (ex.qty || 1) + 1; ex.t = now; flashId = ex.id; showMsg(`Quantité <b>${ex.qty}</b> — <b>${esc(code)}</b>`, 'ok'); }
+    else { const it = { id: newId(), code, format: format || '', desc: '', qty: 1, t: now, tFirst: now }; items.push(it); flashId = it.id; showMsg(`Ajouté : <b>${esc(code)}</b>`, 'ok'); }
+    save(); render();
+  }
+
+  $('list').addEventListener('click', e => {
+    const b = e.target.closest('button[data-act]'); if (!b) return;
+    const it = items.find(x => x.id === b.closest('li').dataset.id); if (!it) return;
+    if (b.dataset.act === 'plus') it.qty++;
+    if (b.dataset.act === 'minus' && it.qty > 1) it.qty--;
+    if (b.dataset.act === 'del') return confirmBox(`Supprimer ${it.code} ?`, () => { items = items.filter(x => x !== it); save(); render(); });
+    save(); render();
+  });
+  $('list').addEventListener('input', e => {
+    if (!e.target.classList.contains('desc')) return;
+    const it = items.find(x => x.id === e.target.dataset.id); if (it) { it.desc = e.target.value; save(); }
+  });
+  $('manual').addEventListener('submit', e => {
+    e.preventDefault(); addCode($('manualCode').value, 'saisie'); $('manualCode').value = '';
+  });
+  function confirmBox(text, onYes) {
+    const d = $('confirmDlg'); $('confirmText').textContent = text;
+    $('confirmYes').onclick = () => { d.close(); onYes(); }; $('confirmNo').onclick = () => d.close();
+    d.showModal ? d.showModal() : (confirm(text) && onYes());
+  }
+  $('clearBtn').addEventListener('click', () => confirmBox(`Effacer les ${items.length} produits ?`, () => { items = []; save(); render(); }));
+
+  // ---------- Camera scanning ----------
+  let stream = null, detector = null, zx = null, loopTimer = null, audioCtx = null;
+  let lastCode = '', lastTime = 0;
+
+  function beep() {
+    try {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = 1500; g.gain.value = 0.15; o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + 0.09);
+    } catch (e) {}
+    try { navigator.vibrate && navigator.vibrate(80); } catch (e) {}
+  }
+
+  function loadScript(src) {
+    return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+  }
+
+  async function setupDecoder() {
+    if ('BarcodeDetector' in window) {
+      try {
+        const fmts = await BarcodeDetector.getSupportedFormats();
+        if (fmts && fmts.length) { detector = new BarcodeDetector({ formats: fmts }); return; }
+      } catch (e) {}
+    }
+    if (!window.ZXing) await loadScript('https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js');
+    const hints = new Map(); hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    zx = new ZXing.MultiFormatReader(); zx.setHints(hints);
+  }
+
+  const canvas = document.createElement('canvas');
+  async function scanFrame() {
+    const v = $('video');
+    if (!stream || v.readyState < 2) return null;
+    if (detector) {
+      const r = await detector.detect(v);
+      return r && r.length ? { text: r[0].rawValue, format: r[0].format } : null;
+    }
+    // ZXing: decode the central band of the frame
+    const w = v.videoWidth, h = v.videoHeight, k = Math.min(1, 1000 / w);
+    canvas.width = Math.round(w * k); canvas.height = Math.round(h * 0.5 * k);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, 0, h * 0.25, w, h * 0.5, 0, 0, canvas.width, canvas.height);
+    try {
+      const src = new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+      const r = zx.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(src)));
+      return { text: r.getText(), format: String(ZXing.BarcodeFormat[r.getBarcodeFormat()] || '') };
+    } catch (e) { return null; }
+  }
+
+  async function loop() {
+    if (!stream) return;
+    try {
+      const r = await scanFrame();
+      if (r && r.text) {
+        const now = Date.now();
+        if (r.text !== lastCode || now - lastTime > 2500) {
+          lastCode = r.text; lastTime = now;
+          beep(); addCode(r.text, r.format);
+          $('aim').classList.add('hit'); setTimeout(() => $('aim').classList.remove('hit'), 400);
+          loopTimer = setTimeout(loop, 900); return;   // short pause after a hit
+        }
+        lastTime = now;
+      }
+    } catch (e) {}
+    loopTimer = setTimeout(loop, 120);
+  }
+
+  async function startCam() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showMsg('Ce navigateur ne donne pas accès à la caméra. Ouvre la page dans Chrome, à une adresse https://.', 'err'); return;
+    }
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch (e) {}
+    $('camLabel').textContent = 'Ouverture…';
+    try {
+      await setupDecoder();
+      stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    } catch (e) {
+      stream = null; $('camLabel').textContent = 'Démarrer le scan';
+      const denied = e && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+      showMsg(denied
+        ? 'Accès à la caméra refusé. Touche le cadenas à gauche de l\'adresse dans Chrome › Autorisations › Caméra › Autoriser, puis réessaie.'
+        : 'Impossible de démarrer la caméra (ou de charger le lecteur). Vérifie ta connexion et réessaie.', 'err');
+      return;
+    }
+    const v = $('video'); v.srcObject = stream; await v.play().catch(() => {});
+    $('cam').classList.add('on'); $('camBtn').classList.add('stop'); $('camLabel').textContent = 'Arrêter le scan';
+    showMsg('Vise le code-barres dans le cadre.', '');
+    const track = stream.getVideoTracks()[0];
+    try {
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      $('torchBtn').hidden = !caps.torch;
+      if (caps.focusMode && caps.focusMode.includes('continuous')) track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+    } catch (e) {}
+    loop();
+  }
+  function stopCam() {
+    clearTimeout(loopTimer);
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; torchOn = false;
+    $('cam').classList.remove('on'); $('camBtn').classList.remove('stop'); $('camLabel').textContent = 'Démarrer le scan';
+  }
+  $('camBtn').addEventListener('click', () => stream ? stopCam() : startCam());
+  let torchOn = false;
+  $('torchBtn').addEventListener('click', () => {
+    const t = stream && stream.getVideoTracks()[0]; if (!t) return;
+    torchOn = !torchOn; t.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && stream) stopCam(); });
+
+  // ---------- ODS export (zip written by hand, no library) ----------
+  const crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = crcTable[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  function zip(files) { // [{name, data:Uint8Array}] stored (no compression)
+    const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+    const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF,
+      dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+    for (const f of files) {
+      const name = enc.encode(f.name), crc = crc32(f.data), sz = f.data.length;
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+      h.setUint16(10, dt, true); h.setUint16(12, dd, true); h.setUint32(14, crc, true); h.setUint32(18, sz, true); h.setUint32(22, sz, true);
+      h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+      parts.push(new Uint8Array(h.buffer), name, f.data);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+      c.setUint16(12, dt, true); c.setUint16(14, dd, true); c.setUint32(16, crc, true); c.setUint32(20, sz, true); c.setUint32(24, sz, true);
+      c.setUint16(28, name.length, true); c.setUint32(42, off, true);
+      central.push(new Uint8Array(c.buffer), name);
+      off += 30 + name.length + sz;
+    }
+    const cSize = central.reduce((s, p) => s + p.length, 0);
+    const e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+    e.setUint32(12, cSize, true); e.setUint32(16, off, true);
+    return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/vnd.oasis.opendocument.spreadsheet' });
+  }
+  const x = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  function isoLocal(t) { const d = new Date(t), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+  function buildOds() {
+    const rows = [...items].sort((a, b) => (a.tFirst || a.t) - (b.tFirst || b.t));
+    const str = v => `<table:table-cell office:value-type="string"><text:p>${x(v)}</text:p></table:table-cell>`;
+    const num = v => `<table:table-cell office:value-type="float" office:value="${v}"><text:p>${v}</text:p></table:table-cell>`;
+    const date = t => `<table:table-cell table:style-name="cDate" office:value-type="date" office:date-value="${isoLocal(t)}"><text:p>${x(fmtDate(t))}</text:p></table:table-cell>`;
+    const head = ['Code-barres', 'Description', 'Quantité', 'Type de code', 'Premier scan', 'Dernier scan']
+      .map(h => `<table:table-cell table:style-name="cHead" office:value-type="string"><text:p>${x(h)}</text:p></table:table-cell>`).join('');
+    const body = rows.map(it => `<table:table-row>${str(it.code)}${str(it.desc || '')}${num(it.qty || 1)}${str(it.format || '')}${date(it.tFirst || it.t)}${date(it.t)}</table:table-row>`).join('');
+    const widths = ['4.2cm', '6.5cm', '2.2cm', '3cm', '3.8cm', '3.8cm'];
+    const content = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" office:version="1.2">
+<office:automatic-styles>
+${widths.map((w, i) => `<style:style style:name="co${i}" style:family="table-column"><style:table-column-properties style:column-width="${w}"/></style:style>`).join('')}
+<number:date-style style:name="nDate"><number:year number:style="long"/><number:text>-</number:text><number:month number:style="long"/><number:text>-</number:text><number:day number:style="long"/><number:text> </number:text><number:hours number:style="long"/><number:text>:</number:text><number:minutes number:style="long"/></number:date-style>
+<style:style style:name="cDate" style:family="table-cell" style:data-style-name="nDate"/>
+<style:style style:name="cHead" style:family="table-cell"><style:text-properties fo:font-weight="bold"/></style:style>
+</office:automatic-styles>
+<office:body><office:spreadsheet><table:table table:name="Scans">
+${widths.map((w, i) => `<table:table-column table:style-name="co${i}"/>`).join('')}
+<table:table-row>${head}</table:table-row>
+${body}
+</table:table></office:spreadsheet></office:body></office:document-content>`;
+    const manifest = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
+<manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>
+<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>`;
+    const enc = new TextEncoder();
+    return zip([
+      { name: 'mimetype', data: enc.encode('application/vnd.oasis.opendocument.spreadsheet') },
+      { name: 'META-INF/manifest.xml', data: enc.encode(manifest) },
+      { name: 'content.xml', data: enc.encode(content) },
+    ]);
+  }
+  window.__buildOds = buildOds; // for testing
+  const fileName = () => `scans-${new Date().toISOString().slice(0, 10)}.ods`;
+
+  $('odsBtn').addEventListener('click', () => {
+    const url = URL.createObjectURL(buildOds());
+    const a = document.createElement('a'); a.href = url; a.download = fileName();
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showMsg(`Fichier <b>${fileName()}</b> téléchargé (dossier Téléchargements).`, 'ok');
+  });
+  if (navigator.canShare) {
+    try { if (navigator.canShare({ files: [new File(['x'], 't.ods', { type: 'application/vnd.oasis.opendocument.spreadsheet' })] })) $('shareBtn').hidden = false; } catch (e) {}
+  }
+  $('shareBtn').addEventListener('click', async () => {
+    const f = new File([buildOds()], fileName(), { type: 'application/vnd.oasis.opendocument.spreadsheet' });
+    try { await navigator.share({ files: [f], title: 'Scans' }); } catch (e) {}
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
