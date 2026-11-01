@@ -49,6 +49,10 @@
   .ctl a{font-size:13px;color:var(--muted)}
   .empty{color:var(--muted);text-align:center;padding:26px 10px;border:1px dashed var(--line);border-radius:12px}
   .foot{margin-top:16px;color:var(--muted);font-size:13px}
+  details.sync{margin-top:18px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  details.sync summary{font-weight:600;cursor:pointer}
+  .syncstat{font-size:14px;color:var(--muted);margin-top:6px}
+  .syncstat.ok{color:var(--accent)} .syncstat.err{color:var(--warn)}
   dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);padding:18px;max-width:340px}
   dialog::backdrop{background:rgba(0,0,0,.4)}
   .danger{background:var(--warn)!important;color:#fff!important;border-color:var(--warn)!important}
@@ -84,8 +88,18 @@
       <button class="sec" id="shareBtn" hidden>Partager</button>
     </div>
   </div>
+  <div class="syncstat" id="syncStat" hidden></div>
   <ul id="list"></ul>
   <div class="row" style="justify-content:flex-end"><button class="sec" id="clearBtn">Tout effacer</button></div>
+  <details class="sync" id="syncBox">
+    <summary>⚙️ Google Sheets (synchro automatique)</summary>
+    <p class="foot" style="margin-top:8px">Colle ici l'adresse de ton script Google (elle finit par <b>/exec</b>). Ta liste sera copiée automatiquement dans ta feuille Google à chaque changement.</p>
+    <form class="row" id="syncForm" autocomplete="off">
+      <input type="text" id="syncUrl" placeholder="https://script.google.com/macros/s/…/exec">
+      <button class="sec" type="submit">Enregistrer</button>
+    </form>
+    <div class="row"><button class="sec" id="syncNow" type="button">Envoyer maintenant</button><button class="sec" id="syncOff" type="button">Désactiver</button></div>
+  </details>
   <p class="foot">La liste reste sur ce téléphone. « Télécharger .ods » crée un classeur OpenOffice Calc ; « Partager » permet de l'envoyer par courriel, Drive, etc.</p>
 </main>
 
@@ -103,7 +117,36 @@
   const KEY = 'barcode-scans-v1';
   let items = [];
   try { items = JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch (e) {}
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {} };
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {} scheduleSync(); };
+
+  // ---------- Google Sheets sync (sends the whole list; the script rewrites the sheet) ----------
+  const SYNC_KEY = 'barcode-sync-url';
+  let syncUrl = ''; try { syncUrl = localStorage.getItem(SYNC_KEY) || ''; } catch (e) {}
+  let syncTimer = null, syncDirty = false;
+  function setSyncStat(text, kind) { const el = document.getElementById('syncStat'); el.hidden = !text; el.textContent = text; el.className = 'syncstat ' + (kind || ''); }
+  function scheduleSync(now) {
+    if (!syncUrl) return;
+    syncDirty = true; clearTimeout(syncTimer);
+    setSyncStat('Google Sheets : envoi en attente…');
+    syncTimer = setTimeout(doSync, now ? 0 : 1500);
+  }
+  async function doSync() {
+    if (!syncUrl || !syncDirty) return;
+    syncDirty = false;
+    const rows = [...items].sort((a, b) => (a.tFirst || a.t) - (b.tFirst || b.t))
+      .map(it => [it.code, it.desc || '', it.qty || 1, it.format || '', it.tFirst || it.t, it.t]);
+    setSyncStat('Google Sheets : envoi…');
+    try {
+      await fetch(syncUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ rows }) });
+      const d = new Date(), p = n => String(n).padStart(2, '0');
+      setSyncStat(`✓ Envoyé à Google Sheets à ${p(d.getHours())} h ${p(d.getMinutes())}`, 'ok');
+    } catch (e) {
+      syncDirty = true;
+      setSyncStat('Google Sheets : pas de connexion, nouvel essai automatique…', 'err');
+      clearTimeout(syncTimer); syncTimer = setTimeout(doSync, 15000);
+    }
+  }
+  window.addEventListener('online', () => { if (syncDirty) doSync(); });
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtDate = t => new Date(t).toLocaleString('fr-CA', {dateStyle:'short', timeStyle:'short'});
@@ -159,7 +202,7 @@
     $('confirmYes').onclick = () => { d.close(); onYes(); }; $('confirmNo').onclick = () => d.close();
     d.showModal ? d.showModal() : (confirm(text) && onYes());
   }
-  $('clearBtn').addEventListener('click', () => confirmBox(`Effacer les ${items.length} produits ?`, () => { items = []; save(); render(); }));
+  $('clearBtn').addEventListener('click', () => confirmBox(`Effacer les ${items.length} produits ?${syncUrl ? ' Ta feuille Google sera aussi vidée.' : ''}`, () => { items = []; save(); render(); }));
 
   // ---------- Camera scanning ----------
   let stream = null, detector = null, zx = null, loopTimer = null, audioCtx = null;
@@ -354,6 +397,22 @@ ${body}
     // Chrome refuses to share .ods files: save it instead and explain how to send it
     downloadOds();
     showMsg(`Ton téléphone ne permet pas de partager ce type de fichier directement. Le fichier <b>${fileName()}</b> a été mis dans <b>Téléchargements</b> : dans Gmail (ou Drive), touche le trombone 📎 › Joindre un fichier › Téléchargements pour l'envoyer.`, 'err');
+  });
+
+  // Sync settings
+  $('syncUrl').value = syncUrl;
+  if (syncUrl) setSyncStat('Synchro Google Sheets activée', 'ok');
+  $('syncForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const v = $('syncUrl').value.trim();
+    if (!/^https:\/\/script\.google\.com\/.+\/exec/.test(v)) { setSyncStat('Adresse invalide : elle doit commencer par https://script.google.com/ et finir par /exec', 'err'); return; }
+    syncUrl = v; try { localStorage.setItem(SYNC_KEY, v); } catch (e) {}
+    scheduleSync(true);
+  });
+  $('syncNow').addEventListener('click', () => { if (!syncUrl) return setSyncStat('Enregistre d\'abord l\'adresse du script.', 'err'); scheduleSync(true); });
+  $('syncOff').addEventListener('click', () => {
+    syncUrl = ''; $('syncUrl').value = ''; try { localStorage.removeItem(SYNC_KEY); } catch (e) {}
+    setSyncStat('Synchro Google Sheets désactivée', '');
   });
 
   render();
