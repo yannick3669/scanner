@@ -56,6 +56,22 @@
   details.sync summary{font-weight:600;cursor:pointer}
   .syncstat{font-size:14px;color:var(--muted);margin-top:6px}
   .syncstat.ok{color:var(--accent)} .syncstat.err{color:var(--warn)}
+  .mode{display:flex;gap:0;margin-bottom:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
+  .mode button{flex:1;padding:12px;border:0;background:transparent;color:var(--ink);font-size:16px;font-weight:650;cursor:pointer}
+  .mode button.on{background:var(--accent);color:var(--accent-ink)}
+  .mode button.on.rm{background:var(--warn);color:#fff}
+  .btn.rm{background:var(--warn);color:#fff}
+  .msg.alert{border:2px solid #d9822b;background:#fff4e5;color:#1d1d1b;font-size:16px}
+  .shop{margin-top:16px;background:#fff4e5;border:1px solid #f0c48a;border-radius:12px;padding:10px 12px;color:#1d1d1b}
+  .shop summary{font-weight:700;cursor:pointer}
+  .shop ul{margin-top:8px}
+  .shop li{background:transparent;border:0;border-top:1px solid #f0c48a;border-radius:0;padding:8px 2px;margin:0;display:flex;justify-content:space-between;gap:8px}
+  .shop .need{font-weight:700;white-space:nowrap}
+  .shop .scat{color:#6b6a65;font-size:12px}
+  li.low{border-color:#d9822b;box-shadow:inset 4px 0 0 #d9822b}
+  .lowtag{margin-top:6px;font-size:13px;font-weight:600;color:#b4432f}
+  .minbox{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--muted);margin-left:6px}
+  .minbox input{width:52px;padding:7px 6px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px;text-align:center}
   dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);padding:18px;max-width:340px}
   dialog::backdrop{background:rgba(0,0,0,.4)}
   .danger{background:var(--warn)!important;color:#fff!important;border-color:var(--warn)!important}
@@ -64,6 +80,10 @@
 <body>
 <main>
   <h1>Scanner de codes-barres</h1>
+  <div class="mode" id="mode">
+    <button type="button" data-mode="add" class="on">➕ Ajouter</button>
+    <button type="button" data-mode="remove">➖ Retirer</button>
+  </div>
 
   <button class="btn" id="camBtn">
     <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
@@ -78,12 +98,17 @@
 
   <form class="row" id="manual" autocomplete="off">
     <input type="text" id="manualCode" inputmode="numeric" placeholder="…ou taper un code">
-    <button class="sec" type="submit">Ajouter</button>
+    <button class="sec" type="submit" id="manualBtn">Ajouter</button>
   </form>
   <label class="opts"><input type="checkbox" id="merge" checked> Même code scanné de nouveau = quantité +1</label>
   <label class="opts"><input type="checkbox" id="autoName" checked> Trouver le nom du produit automatiquement</label>
 
   <div class="msg" id="msg"></div>
+
+  <details class="shop" id="shopBox" open hidden>
+    <summary>🛒 À acheter <span id="shopCount"></span></summary>
+    <ul id="shopList"></ul>
+  </details>
 
   <div class="bar">
     <h2>Produits <span class="count" id="count"></span></h2>
@@ -102,6 +127,7 @@
       <input type="text" id="syncUrl" placeholder="https://script.google.com/macros/s/…/exec">
       <button class="sec" type="submit">Enregistrer</button>
     </form>
+    <label class="opts"><input type="checkbox" id="mailAlert" checked> M'avertir par courriel quand un produit passe sous son minimum</label>
     <div class="row"><button class="sec" id="syncNow" type="button">Envoyer maintenant</button><button class="sec" id="syncOff" type="button">Désactiver</button></div>
   </details>
   <p class="foot">La liste reste sur ce téléphone. « Télécharger .ods » crée un classeur OpenOffice Calc ; « Partager » permet de l'envoyer par courriel, Drive, etc.</p>
@@ -121,6 +147,12 @@
   const KEY = 'barcode-scans-v1';
   let items = [];
   try { items = JSON.parse(localStorage.getItem(KEY) || '[]') || []; } catch (e) {}
+  const q = it => (Number.isFinite(it.qty) ? it.qty : 1);
+  const isLow = it => it.min > 0 && q(it) < it.min;
+  const ALERT_KEY = 'barcode-alerts', MAIL_KEY = 'barcode-mail';
+  let pendingAlerts = [];
+  try { pendingAlerts = JSON.parse(localStorage.getItem(ALERT_KEY) || '[]') || []; } catch (e) {}
+  const saveAlerts = () => { try { localStorage.setItem(ALERT_KEY, JSON.stringify(pendingAlerts)); } catch (e) {} };
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {} scheduleSync(); };
 
   // ---------- Google Sheets sync (sends the whole list; the script rewrites the sheet) ----------
@@ -138,10 +170,13 @@
     if (!syncUrl || !syncDirty) return;
     syncDirty = false;
     const rows = sortedForExport()
-      .map(it => [it.code, it.desc || '', it.qty || 1, it.format || '', it.tFirst || it.t, it.t, it.cat || '']);
+      .map(it => [it.code, it.desc || '', q(it), it.format || '', it.tFirst || it.t, it.t, it.cat || '', it.min || '']);
+    const mail = document.getElementById('mailAlert').checked;
+    const alerts = mail ? pendingAlerts.slice() : [];
     setSyncStat('Google Sheets : envoi…');
     try {
-      await fetch(syncUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ rows }) });
+      await fetch(syncUrl, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ rows, alerts }) });
+      if (alerts.length) { pendingAlerts = pendingAlerts.slice(alerts.length); saveAlerts(); }
       const d = new Date(), p = n => String(n).padStart(2, '0');
       setSyncStat(`✓ Envoyé à Google Sheets à ${p(d.getHours())} h ${p(d.getMinutes())}`, 'ok');
     } catch (e) {
@@ -162,9 +197,9 @@
     $('count').textContent = items.length ? `(${items.length})` : '';
     $('odsBtn').disabled = $('shareBtn').disabled = $('clearBtn').disabled = $('fillBtn').disabled = !items.length;
     const list = $('list');
-    if (!items.length) { list.innerHTML = '<li class="empty">Aucun produit pour l\'instant.</li>'; return; }
+    if (!items.length) { list.innerHTML = '<li class="empty">Aucun produit pour l\'instant.</li>'; renderShop(); return; }
     list.innerHTML = [...items].sort((a, b) => b.t - a.t).map(it => `
-      <li data-id="${esc(it.id)}" class="${it.id === flashId ? 'flash' : ''}">
+      <li data-id="${esc(it.id)}" class="${it.id === flashId ? 'flash' : ''}${isLow(it) ? ' low' : ''}">
         <div class="top"><span class="code">${esc(it.code)}</span><span class="meta">${esc(fmtDate(it.t))}</span></div>
         <input class="desc" data-id="${esc(it.id)}" placeholder="Description (facultatif)" value="${esc(it.desc)}">
         <select class="cat${it.cat ? '' : ' none'}" data-id="${esc(it.id)}">
@@ -172,12 +207,21 @@
           ${CATS.map(c => `<option${c === it.cat ? ' selected' : ''}>${c}</option>`).join('')}
         </select>
         <div class="ctl">
-          <button data-act="minus" aria-label="Moins">−</button><span class="qty">${it.qty}</span><button data-act="plus" aria-label="Plus">+</button>
+          <button data-act="minus" aria-label="Moins">−</button><span class="qty">${q(it)}</span><button data-act="plus" aria-label="Plus">+</button>
+          <label class="minbox">Min <input class="minIn" data-id="${esc(it.id)}" type="number" min="0" inputmode="numeric" placeholder="—" value="${it.min || ''}"></label>
           ${/^\d{8,14}$/.test(it.code) && (!it.desc || !it.cat) ? `<button class="find" data-act="find" title="Trouver le nom">🔎</button>` : ''}
           <button class="del" data-act="del">Supprimer</button>
         </div>
+        ${isLow(it) ? `<div class="lowtag">⚠️ Sous le minimum — à acheter : ${it.min - q(it)}</div>` : ''}
       </li>`).join('');
     flashId = null;
+    renderShop();
+  }
+  function renderShop() {
+    const low = sortedForExport().filter(isLow);
+    $('shopBox').hidden = !low.length;
+    $('shopCount').textContent = low.length ? `(${low.length})` : '';
+    $('shopList').innerHTML = low.map(it => `<li><span>${esc(it.desc || it.code)}<br><span class="scat">${esc(it.cat || '')} · il en reste ${q(it)} (min ${it.min})</span></span><span class="need">× ${it.min - q(it)}</span></li>`).join('');
   }
   function sortedForExport() {
     const ci = c => { const i = CATS.indexOf(c); return i < 0 ? CATS.length : i; };
@@ -267,11 +311,61 @@
     showMsg(`${found} produit${found > 1 ? 's' : ''} complété${found > 1 ? 's' : ''} sur ${todo.length}. Les autres : choisis la catégorie à la main.`, found ? 'ok' : 'err');
   });
 
+  // ---------- Mode Ajouter / Retirer, minimum and alerts ----------
+  let mode = 'add';
+  function setMode(m) {
+    mode = m;
+    document.querySelectorAll('#mode button').forEach(b => {
+      b.classList.toggle('on', b.dataset.mode === m);
+      b.classList.toggle('rm', b.dataset.mode === 'remove');
+    });
+    $('camBtn').classList.toggle('rm', m === 'remove');
+    if (!stream) $('camLabel').textContent = m === 'remove' ? 'Scanner pour retirer' : 'Démarrer le scan';
+    $('manualBtn').textContent = m === 'remove' ? 'Retirer' : 'Ajouter';
+    showMsg(m === 'remove' ? 'Mode <b>Retirer</b> : chaque produit scanné baisse sa quantité de 1.' : 'Mode <b>Ajouter</b> : chaque produit scanné est ajouté (ou +1).', '');
+  }
+  $('mode').addEventListener('click', e => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
+  try { if (localStorage.getItem(MAIL_KEY) === '0') $('mailAlert').checked = false; } catch (e) {}
+  $('mailAlert').addEventListener('change', e => { try { localStorage.setItem(MAIL_KEY, e.target.checked ? '1' : '0'); } catch (x) {} });
+
+  function alertTone() {
+    try {
+      [0, 0.22].forEach(d => {
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = 520; g.gain.value = 0.2; o.connect(g); g.connect(audioCtx.destination);
+        o.start(audioCtx.currentTime + d); o.stop(audioCtx.currentTime + d + 0.15);
+      });
+    } catch (e) {}
+    try { navigator.vibrate && navigator.vibrate([250, 120, 250]); } catch (e) {}
+  }
+  // Call after a change; warns when the item has just dropped under its minimum
+  function checkLow(it, wasLow) {
+    if (wasLow || !isLow(it)) return false;
+    const name = it.desc || it.code;
+    showMsg(`⚠️ <b>Il reste ${q(it)} × ${esc(name)}</b> (minimum ${it.min}).<br>Ajouté à la liste 🛒 À acheter.`, 'alert');
+    alertTone();
+    pendingAlerts.push([name, q(it), it.min, it.code, it.cat || '']); saveAlerts();
+    return true;
+  }
+
+  function removeCode(code) {
+    code = String(code).trim(); if (!code) return;
+    const same = items.filter(x => x.code === code);
+    const it = same.find(x => q(x) > 0) || same[0];
+    if (!it) { showMsg(`Le produit <b>${esc(code)}</b> n'est pas dans ta liste — rien à retirer.<br>Passe en mode <b>➕ Ajouter</b> pour l'ajouter.`, 'err'); return; }
+    if (q(it) === 0) { showMsg(`<b>${esc(it.desc || code)}</b> est déjà à 0.`, 'err'); flashId = it.id; render(); return; }
+    const wasLow = isLow(it);
+    it.qty = q(it) - 1; it.t = Date.now(); flashId = it.id;
+    if (!checkLow(it, wasLow)) showMsg(`Retiré : <b>${esc(it.desc || code)}</b> — il en reste <b>${q(it)}</b>`, 'ok');
+    save(); render();
+  }
+  function handleCode(code, format) { return mode === 'remove' ? removeCode(code) : addCode(code, format); }
+
   function addCode(code, format) {
     code = String(code).trim(); if (!code) return;
     const now = Date.now();
     const ex = $('merge').checked && items.find(x => x.code === code);
-    if (ex) { ex.qty = (ex.qty || 1) + 1; ex.t = now; flashId = ex.id; showMsg(`Quantité <b>${ex.qty}</b> — <b>${esc(code)}</b>`, 'ok'); }
+    if (ex) { ex.qty = q(ex) + 1; ex.t = now; flashId = ex.id; showMsg(`Quantité <b>${ex.qty}</b> — <b>${esc(code)}</b>`, 'ok'); }
     else {
       const it = { id: newId(), code, format: format || '', desc: '', qty: 1, t: now, tFirst: now };
       items.push(it); flashId = it.id; showMsg(`Ajouté : <b>${esc(code)}</b>`, 'ok');
@@ -283,13 +377,22 @@
   $('list').addEventListener('click', e => {
     const b = e.target.closest('button[data-act]'); if (!b) return;
     const it = items.find(x => x.id === b.closest('li').dataset.id); if (!it) return;
-    if (b.dataset.act === 'plus') it.qty++;
-    if (b.dataset.act === 'minus' && it.qty > 1) it.qty--;
+    const wasLow = isLow(it);
+    if (b.dataset.act === 'plus') it.qty = q(it) + 1;
+    if (b.dataset.act === 'minus' && q(it) > 0) { it.qty = q(it) - 1; checkLow(it, wasLow); }
     if (b.dataset.act === 'find') return fillName(it);
     if (b.dataset.act === 'del') return confirmBox(`Supprimer ${it.code} ?`, () => { items = items.filter(x => x !== it); save(); render(); });
     save(); render();
   });
   $('list').addEventListener('change', e => {
+    if (e.target.classList.contains('minIn')) {
+      const it = items.find(x => x.id === e.target.dataset.id); if (!it) return;
+      const wasLow = isLow(it);
+      const v = parseInt(e.target.value, 10);
+      it.min = v > 0 ? v : 0;
+      checkLow(it, wasLow);
+      save(); render(); return;
+    }
     if (!e.target.classList.contains('cat')) return;
     const it = items.find(x => x.id === e.target.dataset.id); if (it) { it.cat = e.target.value; save(); render(); }
   });
@@ -298,7 +401,7 @@
     const it = items.find(x => x.id === e.target.dataset.id); if (it) { it.desc = e.target.value; save(); }
   });
   $('manual').addEventListener('submit', e => {
-    e.preventDefault(); addCode($('manualCode').value, 'saisie'); $('manualCode').value = '';
+    e.preventDefault(); handleCode($('manualCode').value, 'saisie'); $('manualCode').value = '';
   });
   function confirmBox(text, onYes) {
     const d = $('confirmDlg'); $('confirmText').textContent = text;
@@ -311,10 +414,10 @@
   let stream = null, detector = null, zx = null, loopTimer = null, audioCtx = null;
   let lastCode = '', lastTime = 0;
 
-  function beep() {
+  function beep(freq) {
     try {
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-      o.frequency.value = 1500; g.gain.value = 0.15; o.connect(g); g.connect(audioCtx.destination);
+      o.frequency.value = freq || 1500; g.gain.value = 0.15; o.connect(g); g.connect(audioCtx.destination);
       o.start(); o.stop(audioCtx.currentTime + 0.09);
     } catch (e) {}
     try { navigator.vibrate && navigator.vibrate(80); } catch (e) {}
@@ -364,7 +467,7 @@
         const now = Date.now();
         if (r.text !== lastCode || now - lastTime > 2500) {
           lastCode = r.text; lastTime = now;
-          beep(); addCode(r.text, r.format);
+          beep(mode === 'remove' ? 900 : 1500); handleCode(r.text, r.format);
           $('aim').classList.add('hit'); setTimeout(() => $('aim').classList.remove('hit'), 400);
           loopTimer = setTimeout(loop, 900); return;   // short pause after a hit
         }
@@ -406,7 +509,7 @@
     clearTimeout(loopTimer);
     if (stream) stream.getTracks().forEach(t => t.stop());
     stream = null; torchOn = false;
-    $('cam').classList.remove('on'); $('camBtn').classList.remove('stop'); $('camLabel').textContent = 'Démarrer le scan';
+    $('cam').classList.remove('on'); $('camBtn').classList.remove('stop'); $('camLabel').textContent = mode === 'remove' ? 'Scanner pour retirer' : 'Démarrer le scan';
   }
   $('camBtn').addEventListener('click', () => stream ? stopCam() : startCam());
   let torchOn = false;
@@ -414,6 +517,10 @@
     const t = stream && stream.getVideoTracks()[0]; if (!t) return;
     torchOn = !torchOn; t.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(() => {});
   });
+  // Enable sounds (alerts) after the first touch anywhere
+  document.addEventListener('pointerdown', () => {
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch (e) {}
+  }, { once: true });
   document.addEventListener('visibilitychange', () => { if (document.hidden && stream) stopCam(); });
 
   // ---------- ODS export (zip written by hand, no library) ----------
@@ -450,10 +557,10 @@
     const str = v => `<table:table-cell office:value-type="string"><text:p>${x(v)}</text:p></table:table-cell>`;
     const num = v => `<table:table-cell office:value-type="float" office:value="${v}"><text:p>${v}</text:p></table:table-cell>`;
     const date = t => `<table:table-cell table:style-name="cDate" office:value-type="date" office:date-value="${isoLocal(t)}"><text:p>${x(fmtDate(t))}</text:p></table:table-cell>`;
-    const head = ['Catégorie', 'Code-barres', 'Description', 'Quantité', 'Type de code', 'Premier scan', 'Dernier scan']
+    const head = ['Catégorie', 'Code-barres', 'Description', 'Quantité', 'Minimum', 'À acheter', 'Type de code', 'Premier scan', 'Dernier scan']
       .map(h => `<table:table-cell table:style-name="cHead" office:value-type="string"><text:p>${x(h)}</text:p></table:table-cell>`).join('');
-    const body = rows.map(it => `<table:table-row>${str(it.cat || '')}${str(it.code)}${str(it.desc || '')}${num(it.qty || 1)}${str(it.format || '')}${date(it.tFirst || it.t)}${date(it.t)}</table:table-row>`).join('');
-    const widths = ['3.6cm', '4.2cm', '8cm', '2.2cm', '3cm', '3.8cm', '3.8cm'];
+    const body = rows.map(it => `<table:table-row>${str(it.cat || '')}${str(it.code)}${str(it.desc || '')}${num(q(it))}${it.min > 0 ? num(it.min) : str('')}${isLow(it) ? num(it.min - q(it)) : str('')}${str(it.format || '')}${date(it.tFirst || it.t)}${date(it.t)}</table:table-row>`).join('');
+    const widths = ['3.6cm', '4.2cm', '8cm', '2.2cm', '2.2cm', '2.2cm', '3cm', '3.8cm', '3.8cm'];
     const content = `<?xml version="1.0" encoding="UTF-8"?>
 <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" office:version="1.2">
 <office:automatic-styles>
